@@ -10,13 +10,12 @@ data/
 *.tar.gz
 *.csv
 
-# Model checkpoints & weights
-models/
-*.pt
-*.pth
-*.onnx
-*.h5
-*.keras
+# Model checkpoints & weights (exclude heavy weights, allow json metrics)
+models/*.pt
+models/*.pth
+models/*.onnx
+models/*.h5
+models/*.keras
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
