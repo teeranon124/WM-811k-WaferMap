@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import torch
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
 
 class GradCAM:
     """
@@ -58,45 +59,36 @@ class GradCAM:
             
         return cam, target_class
 
-def overlay_heatmap_on_wafer(wafer_map, cam, threshold=0.35):
+def overlay_heatmap_on_wafer(wafer_map, cam, threshold=0.30, alpha=0.55):
     """
-    Creates an industrial-grade, crisp explainability overlay:
-    - Background: Black
-    - Wafer Body (Good dies): Clean Dark Navy/Slate Gray
-    - Defect Dies: Sharp White
-    - AI Attention Focus: Glowing Crimson Red highlighting exactly where the model looked!
+    Overlays AI Attention softly onto the ORIGINAL wafer map (viridis palette):
+    - Base: Identical exact colors as Ground Truth (channel 0: purple, 1: teal, 2: yellow)
+    - Attention: Only where CAM > threshold, tint softly with a warm reddish highlight
+      leaving low-attention areas completely in their authentic original colors.
     """
-    h, w = wafer_map.shape
-    overlay = np.zeros((h, w, 3), dtype=np.uint8)
+    # 1. Render the EXACT original wafer map using matplotlib's viridis colormap
+    viridis = plt.get_cmap('viridis')
+    # wafer_map has values {0, 1, 2} -> normalize to [0, 1] for colormap
+    base_rgba = viridis(wafer_map / 2.0)
+    base_rgb = (base_rgba[:, :, :3] * 255).astype(np.uint8)
     
-    # 1. Base clean styling
-    # Good dies = clean professional dark slate (40, 50, 65)
-    overlay[wafer_map == 1] = [38, 48, 60]
+    # 2. Highlight only high-attention region
+    overlay = base_rgb.copy()
     
-    # 2. Defect dies = Crisp White (230, 230, 230)
-    overlay[wafer_map == 2] = [225, 225, 225]
+    # Mask where AI is paying attention (> threshold) and within the wafer disk
+    attention_mask = (cam >= threshold) & (wafer_map > 0)
     
-    # 3. AI Attention: Where CAM is high (> threshold) within wafer
-    # We tint both good and defect dies with a vibrant heat highlight
-    active_mask = (cam >= threshold) & (wafer_map > 0)
-    
-    if np.any(active_mask):
-        # Apply Jet colormap only to the high-attention zone
-        norm_cam = (cam - threshold) / (1.0 - threshold + 1e-6)
-        norm_cam = np.clip(norm_cam, 0, 1)
+    if np.any(attention_mask):
+        # We use a soft crimson/red highlight for attention
+        highlight_color = np.array([255, 30, 30], dtype=np.float32)
         
-        cam_uint8 = np.uint8(255 * norm_cam)
-        heatmap_colored = cv2.applyColorMap(cam_uint8, cv2.COLORMAP_HOT)
-        heatmap_colored = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+        # Normalized intensity of attention from 0 to 1
+        intensity = (cam[attention_mask] - threshold) / (1.0 - threshold + 1e-6)
+        intensity = np.clip(intensity, 0, 1)[:, np.newaxis]
         
-        # For defect dies inside the attention zone: Glowing Neon Gold/Red
-        defect_and_active = (wafer_map == 2) & active_mask
-        overlay[defect_and_active] = [255, 60, 20] # Intense Red-Orange
-        
-        # For wafer area in the attention zone: Soft Warm Glow
-        wafer_and_active = (wafer_map == 1) & active_mask
-        overlay[wafer_and_active] = np.clip(
-            0.4 * overlay[wafer_and_active] + 0.6 * heatmap_colored[wafer_and_active], 0, 255
-        ).astype(np.uint8)
+        # Blend base with highlight based on attention intensity & alpha
+        current_pixels = overlay[attention_mask].astype(np.float32)
+        blended = (1.0 - alpha * intensity) * current_pixels + (alpha * intensity) * highlight_color
+        overlay[attention_mask] = np.clip(blended, 0, 255).astype(np.uint8)
         
     return overlay
