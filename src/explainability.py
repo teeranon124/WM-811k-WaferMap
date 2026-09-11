@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import cv2
 import torch
 import torch.nn.functional as F
@@ -58,30 +58,45 @@ class GradCAM:
             
         return cam, target_class
 
-def overlay_heatmap_on_wafer(wafer_map, cam, alpha=0.55):
+def overlay_heatmap_on_wafer(wafer_map, cam, threshold=0.35):
     """
-    Overlays colored Grad-CAM heatmap directly onto the wafer map.
+    Creates an industrial-grade, crisp explainability overlay:
+    - Background: Black
+    - Wafer Body (Good dies): Clean Dark Navy/Slate Gray
+    - Defect Dies: Sharp White
+    - AI Attention Focus: Glowing Crimson Red highlighting exactly where the model looked!
     """
-    # Create RGB representation of wafer map:
-    # 0: Dark purple / black background
-    # 1: Dark teal (good die)
-    # 2: Bright yellow (defect die)
     h, w = wafer_map.shape
-    base_img = np.zeros((h, w, 3), dtype=np.uint8)
-    base_img[wafer_map == 0] = [20, 10, 30]      # Background
-    base_img[wafer_map == 1] = [30, 110, 110]    # Good die
-    base_img[wafer_map == 2] = [240, 230, 30]    # Defect die
+    overlay = np.zeros((h, w, 3), dtype=np.uint8)
     
-    # Heatmap with COLORMAP_JET
-    heatmap_colored = cv2.applyColorMap(np.uint8(255 * cam), cv2.COLORMAP_JET)
-    heatmap_colored = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+    # 1. Base clean styling
+    # Good dies = clean professional dark slate (40, 50, 65)
+    overlay[wafer_map == 1] = [38, 48, 60]
     
-    # Blend only within the valid wafer region (wafer_map > 0)
-    blended = base_img.copy()
-    valid_mask = (wafer_map > 0)
-    blended[valid_mask] = np.clip(
-        (1 - alpha) * base_img[valid_mask] + alpha * heatmap_colored[valid_mask],
-        0, 255
-    ).astype(np.uint8)
+    # 2. Defect dies = Crisp White (230, 230, 230)
+    overlay[wafer_map == 2] = [225, 225, 225]
     
-    return blended
+    # 3. AI Attention: Where CAM is high (> threshold) within wafer
+    # We tint both good and defect dies with a vibrant heat highlight
+    active_mask = (cam >= threshold) & (wafer_map > 0)
+    
+    if np.any(active_mask):
+        # Apply Jet colormap only to the high-attention zone
+        norm_cam = (cam - threshold) / (1.0 - threshold + 1e-6)
+        norm_cam = np.clip(norm_cam, 0, 1)
+        
+        cam_uint8 = np.uint8(255 * norm_cam)
+        heatmap_colored = cv2.applyColorMap(cam_uint8, cv2.COLORMAP_HOT)
+        heatmap_colored = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+        
+        # For defect dies inside the attention zone: Glowing Neon Gold/Red
+        defect_and_active = (wafer_map == 2) & active_mask
+        overlay[defect_and_active] = [255, 60, 20] # Intense Red-Orange
+        
+        # For wafer area in the attention zone: Soft Warm Glow
+        wafer_and_active = (wafer_map == 1) & active_mask
+        overlay[wafer_and_active] = np.clip(
+            0.4 * overlay[wafer_and_active] + 0.6 * heatmap_colored[wafer_and_active], 0, 255
+        ).astype(np.uint8)
+        
+    return overlay

@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -56,7 +56,7 @@ for row_idx, target_name in enumerate(sample_classes):
     wmap[t_np[1] > 0.5] = 1
     wmap[t_np[2] > 0.5] = 2
     
-    overlay = overlay_heatmap_on_wafer(wmap, cam, alpha=0.6)
+    overlay = overlay_heatmap_on_wafer(wmap, cam, threshold=0.35)
     
     # Col 1: Original Raw Wafer Map
     axes[row_idx, 0].imshow(wmap, cmap="viridis")
